@@ -1,6 +1,6 @@
 # 导入聚宽函数库
 import jqdata
-
+import torch.nn as nn
 
 # 初始化函数，设定基准等等
 def initialize(context):
