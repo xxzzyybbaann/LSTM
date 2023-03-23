@@ -1,0 +1,157 @@
+# 导入聚宽函数库
+import jqdata
+
+
+# 初始化函数，设定基准等等
+def initialize(context):
+    # 设定沪深300作为基准
+    set_benchmark('000300.XSHG')
+    # 开启动态复权模式(真实价格)
+    set_option('use_real_price', True)
+    # 输出内容到日志 log.info()
+    log.info('初始函数开始运行且全局只运行一次')
+
+    # 股票池
+    g.security = '000001.XSHE'
+
+    # LSTM模型参数
+    g.input_size = 5  # 输入层维度
+    g.hidden_size = 10  # 隐藏层维度
+    g.output_size = 1  # 输出层维度
+    g.num_layers = 2  # LSTM层数
+    g.learning_rate = 0.01  # 学习率
+    g.num_epochs = 100  # 训练轮数
+
+    # LSTM模型初始化
+    g.model = LSTM(g.input_size, g.hidden_size, g.output_size, g.num_layers)
+
+
+# 开盘前运行函数，每天执行一次，用于获取数据并训练模型
+def before_trading_start(context):
+    # 获取过去120个交易日的收盘价、成交量、市盈率、市净率、市销率数据，并转换为numpy数组格式
+    price_data = \
+    attribute_history(g.security, 120, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['close']
+    volume_data = \
+    attribute_history(g.security, 120, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['volume']
+    pe_data = \
+    attribute_history(g.security, 120, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['pe_ratio']
+    pb_data = \
+    attribute_history(g.security, 120, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['pb_ratio']
+    ps_data = \
+    attribute_history(g.security, 120, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['ps_ratio']
+
+    price_array = np.array(price_data)
+    volume_array = np.array(volume_data)
+    pe_array = np.array(pe_data)
+    pb_array = np.array(pb_data)
+    ps_array = np.array(ps_data)
+
+    # 归一化处理，将所有数据缩放到0-1之间，并拼接成一个二维数组X，形状为(120,g.input_size)
+    price_normed = (price_array - price_array.min()) / (price_array.max() - price_array.min())
+    volume_normed = (volume_array - volume_array.min()) / (volume_array.max() - volume_array.min())
+    pe_normed = (pe_array - pe_array.min()) / (pe_array.max() - pe_array.min())
+    pb_normed = (pb_array - pb_array.min()) / (pb_array.max() - pb_array.min())
+    ps_normed = (ps_array - ps_array.min()) / (ps_array.max() - ps_array.min())
+
+    X = np.column_stack((price_normed, volume_normed, pe_normed, pb_normed, ps_normed))
+
+    # 将X转换为torch张量，并增加一个维度，形状为(120,g.input_size,1)
+    X = torch.from_numpy(X).float().unsqueeze(2)
+
+    # 以最后一天的收盘价作为目标值y，并转换为torch张量，形状为(1,)
+    y = torch.from_numpy(np.array([price_array[-1]])).float()
+
+    # 定义损失函数和优化器
+    criterion = nn.MSELoss()  # 均方误差
+    optimizer = torch.optim.Adam(g.model.parameters(), lr=g.learning_rate)  # Adam优化器
+
+    # 训练模型
+    for epoch in range(g.num_epochs):
+        # 前向传播
+        outputs = g.model(X)  # 得到预测值，形状为(1,)
+        loss = criterion(outputs, y)  # 计算损失值
+
+        # 反向传播和优化
+        optimizer.zero_grad()  # 清空梯度
+        loss.backward()  # 反向传播计算梯度
+        optimizer.step()  # 更新参数
+
+        if (epoch + 1) % 10 == 0:
+            print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, g.num_epochs, loss.item()))
+
+
+
+# 开盘时运行函数，每天执行一次，用于根据模型预测结果进行买卖操作
+def handle_data(context, data):
+    # 获取当日的收盘价、成交量、市盈率、市净率、市销率数据，并转换为numpy数组格式
+    price_data = \
+    attribute_history(g.security, 1, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['close']
+    volume_data = \
+    attribute_history(g.security, 1, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['volume']
+    pe_data = \
+    attribute_history(g.security, 1, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['pe_ratio']
+    pb_data = \
+    attribute_history(g.security, 1, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['pb_ratio']
+    ps_data = \
+    attribute_history(g.security, 1, '1d', ['close', 'volume', 'pe_ratio', 'pb_ratio', 'ps_ratio'], skip_paused=True,
+                      df=False)['ps_ratio']
+
+    price_array = np.array(price_data)
+    volume_array = np.array(volume_data)
+    pe_array = np.array(pe_data)
+    pb_array = np.array(pb_data)
+    ps_array = np.array(ps_data)
+
+    # 归一化处理，将所有数据缩放到0-1之间，并拼接成一个二维数组X，形状为(1,g.input_size)
+    price_normed = (price_array - price_array.min()) / (price_array.max() - price_array.min())
+    volume_normed = (volume_array - volume_array.min()) / (volume_array.max() - volume_array.min())
+    pe_normed = (pe_array - pe_array.min()) / (pe_array.max() - pe_array.min())
+    pb_normed = (pb_array - pb_array.min()) / (pb_array.max() - pb_array.min())
+    ps_normed = (ps_array - ps_array.min()) / (ps_array.max() - ps_array.min())
+
+    X = np.column_stack((price_normed, volume_normed, pe_normed, pb_normed, ps_normed))
+
+    # 将X转换为torch张量，并增加两个维度，形状为(1,g.input_size,1)
+    X = torch.from_numpy(X).float().unsqueeze(0).unsqueeze(2)
+
+    # 使用模型对当日的收益率进行预测，并还原为真实价格
+    prediction = g.model(X)  # 得到预测值，形状为(1,)
+    prediction_price = prediction * (price_max - price_min) + price_min  # 还原真实价格
+
+    # 如果预测价格高于当日收盘价，则买入；如果低于当日收盘价，则卖出
+    if prediction_price > price:
+        order_target_value(g.security, cash)  # 买入
+        log.info('Buying %s' % (g.security))
+
+    elif prediction_price < price:
+        order_target_value(g.security, -cash)  # 卖出
+        log.info('Selling %s' % (g.security))
+
+
+# LSTM模型定义
+class LSTM(nn.Module):
+
+    def __init__(self, input_size, output_size, num_layers):
+        super(LSTM, self).__init__()
+
+        self.input_size = input_size
+        self.output_size = output_size
+        self.num_layers = num_layers
+
+        self.lstm = nn.LSTM(input_size, output_size, num_layers, batch_first=True)  # LSTM层
+
+    def forward(self, x):
+        out, _ = self.lstm(x)  # 前向传播得到输出和隐藏状态
+
+        out = out[:, -1, :]  # 只取最后一个时间步的输出
+
+        return out
